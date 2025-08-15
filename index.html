@@ -1,20 +1,171 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar">
 <head>
-<meta charset="UTF-8">
-<title>اختبار تتبّع المسار - MoCA</title>
-<style>
-  body { text-align: center; font-family: Arial, sans-serif; }
-  canvas { border: 1px solid #000; touch-action: none; }
-  button { margin: 10px; padding: 10px; font-size: 16px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>اختبار تتبّع المسار - MoCA</title>
+  <style>
+    body { text-align: center; font-family: Arial; background: #f5f5f5; }
+    canvas { border: 1px solid #000; touch-action: none; background-color: white; }
+    button { margin: 5px; padding: 8px 15px; font-size: 16px; cursor: pointer; }
+  </style>
 </head>
 <body>
-<h2>اختبار تتبّع المسار - MoCA</h2>
-<canvas id="drawArea" width="600" height="500"></canvas><br>
-<button id="startBtn">ابدأ</button>
-<button id="saveBtn">حفظ</button>
 
-<script src="main.js"></script>
-</body>
-</html>
+<h2>اختبار تتبّع المسار - MoCA</h2>
+<canvas id="drawCanvas"></canvas><br>
+<button onclick="resetCanvas()">🔄 إعادة</button>
+<button onclick="downloadImage()">📷 حفظ الخط فقط</button>
+<button onclick="downloadData()">📄 حفظ بيانات</button>
+
+<script>
+let canvas = document.getElementById('drawCanvas');
+let ctx = canvas.getContext('2d');
+
+// صورة الخلفية
+let bgImage = new Image();
+bgImage.src = "moca.png"; // غيّرها إلى moca.png لو عندك صورة خاصة
+
+// أبعاد الجهاز
+let screenWidth = window.innerWidth;
+let screenHeight = window.innerHeight;
+let canvasWidth, canvasHeight;
+
+// ضبط حجم الكانفاس حسب الجهاز
+function resizeCanvas() {
+    let ratio = bgImage.width / bgImage.height || (4/3);
+    let maxWidth = screenWidth * 0.95;
+    let width = maxWidth;
+    let height = width / ratio;
+
+    if (height > screenHeight * 0.7) {
+        height = screenHeight * 0.7;
+        width = height * ratio;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    canvasWidth = width;
+    canvasHeight = height;
+
+    drawBackground();
+}
+
+function drawBackground() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+}
+
+bgImage.onload = resizeCanvas;
+window.addEventListener('resize', resizeCanvas);
+
+let drawing = false;
+let startTime = null;
+let points = [];
+
+function getRelativeCoords(evt) {
+    let rect = canvas.getBoundingClientRect();
+    let x = evt.clientX - rect.left;
+    let y = evt.clientY - rect.top;
+    let nx = x / canvas.width;
+    let ny = y / canvas.height;
+    return { x, y, nx, ny };
+}
+
+function startDraw(evt) {
+    drawing = true;
+    ctx.beginPath();
+    let coords = getRelativeCoords(evt);
+    ctx.moveTo(coords.x, coords.y);
+    if (!startTime) startTime = Date.now();
+    savePoint(coords);
+}
+
+function draw(evt) {
+    if (!drawing) return;
+    let coords = getRelativeCoords(evt);
+    ctx.lineTo(coords.x, coords.y);
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    savePoint(coords);
+}
+
+function endDraw() {
+    drawing = false;
+    ctx.closePath();
+}
+
+function savePoint(coords) {
+    let t = (Date.now() - startTime) / 1000;
+    points.push({
+        x: coords.x,
+        y: coords.y,
+        nx: coords.nx,
+        ny: coords.ny,
+        t: t
+    });
+}
+
+function resetCanvas() {
+    drawBackground();
+    points = [];
+    startTime = null;
+}
+
+// أحداث الماوس
+canvas.addEventListener('mousedown', startDraw);
+canvas.addEventListener('mousemove', draw);
+canvas.addEventListener('mouseup', endDraw);
+
+// أحداث اللمس
+canvas.addEventListener('touchstart', e => startDraw(e.touches[0]));
+canvas.addEventListener('touchmove', e => {
+    draw(e.touches[0]);
+    e.preventDefault();
+});
+canvas.addEventListener('touchend', endDraw);
+
+// حفظ صورة الخط فقط بدون الخلفية
+function downloadImage() {
+    let tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    let tempCtx = tempCanvas.getContext('2d');
+
+    tempCtx.lineWidth = 2;
+    tempCtx.strokeStyle = 'black';
+    tempCtx.beginPath();
+
+    for (let i = 0; i < points.length; i++) {
+        let p = points[i];
+        if (i === 0) {
+            tempCtx.moveTo(p.x, p.y);
+        } else {
+            tempCtx.lineTo(p.x, p.y);
+        }
+    }
+
+    tempCtx.stroke();
+
+    let link = document.createElement('a');
+    link.download = 'drawing_only.png';
+    link.href = tempCanvas.toDataURL();
+    link.click();
+}
+// حفظ البيانات
+function downloadData() {
+    let data = {
+        screenWidth: screenWidth,
+        screenHeight: screenHeight,
+        canvasWidth: canvasWidth,
+        canvasHeight: canvasHeight,
+        points: points
+    };
+    let blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    let link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'drawing_data.json';
+    link.click();
+}
+</script>
