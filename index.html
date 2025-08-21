@@ -16,38 +16,32 @@
 <canvas id="drawCanvas"></canvas><br>
 <button onclick="resetCanvas()">🔄 إعادة</button>
 <button onclick="downloadImage()">📷 حفظ الخط فقط</button>
-<button onclick="downloadData()">📄 حفظ بيانات</button>
+<button onclick="downloadData()">📄 حفظ بيانات (Resampled)</button>
 
 <script>
 let canvas = document.getElementById('drawCanvas');
 let ctx = canvas.getContext('2d');
 
-// صورة الخلفية
 let bgImage = new Image();
-bgImage.src = "moca.png"; // غيّرها إلى moca.png لو عندك صورة خاصة
+bgImage.src = "moca.png";
 
-// أبعاد الجهاز
 let screenWidth = window.innerWidth;
 let screenHeight = window.innerHeight;
 let canvasWidth, canvasHeight;
 
-// ضبط حجم الكانفاس حسب الجهاز
 function resizeCanvas() {
     let ratio = bgImage.width / bgImage.height || (4/3);
     let maxWidth = screenWidth * 0.95;
     let width = maxWidth;
     let height = width / ratio;
-
     if (height > screenHeight * 0.7) {
         height = screenHeight * 0.7;
         width = height * ratio;
     }
-
     canvas.width = width;
     canvas.height = height;
     canvasWidth = width;
     canvasHeight = height;
-
     drawBackground();
 }
 
@@ -59,11 +53,13 @@ function drawBackground() {
 bgImage.onload = resizeCanvas;
 window.addEventListener('resize', resizeCanvas);
 
-let drawing = false;
+let isDrawing = false;
 let startTime = null;
 let points = [];
+let lastPoint = null;
 
-function getRelativeCoords(evt) {
+// دالة للحصول على الإحداثيات النسبية
+function getCoords(evt) {
     let rect = canvas.getBoundingClientRect();
     let x = evt.clientX - rect.left;
     let y = evt.clientY - rect.top;
@@ -73,44 +69,48 @@ function getRelativeCoords(evt) {
 }
 
 function startDraw(evt) {
-    drawing = true;
-    ctx.beginPath();
-    let coords = getRelativeCoords(evt);
-    ctx.moveTo(coords.x, coords.y);
+    isDrawing = true;
+    let coords = getCoords(evt);
+    lastPoint = coords;
     if (!startTime) startTime = Date.now();
-    savePoint(coords);
 }
 
 function draw(evt) {
-    if (!drawing) return;
-    let coords = getRelativeCoords(evt);
-    ctx.lineTo(coords.x, coords.y);
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    savePoint(coords);
+    let coords = getCoords(evt);
+    let t = (Date.now() - startTime) / 1000;
+
+    if (isDrawing) {
+        // رسم الخط
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(coords.x, coords.y);
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
+
+        lastPoint = coords;
+    }
+
+    // تسجيل النقطة (إذا رافع ايده، lastPoint تتكرر)
+    points.push({
+        x: lastPoint.x,
+        y: lastPoint.y,
+        nx: lastPoint.nx,
+        ny: lastPoint.ny,
+        t: t
+    });
 }
 
 function endDraw() {
-    drawing = false;
-    ctx.closePath();
-}
-
-function savePoint(coords) {
-    let t = (Date.now() - startTime) / 1000;
-    points.push({
-        x: coords.x,
-        y: coords.y,
-        nx: coords.nx,
-        ny: coords.ny,
-        t: t
-    });
+    isDrawing = false;
 }
 
 function resetCanvas() {
     drawBackground();
     points = [];
     startTime = null;
+    lastPoint = null;
 }
 
 // أحداث الماوس
@@ -126,7 +126,36 @@ canvas.addEventListener('touchmove', e => {
 });
 canvas.addEventListener('touchend', endDraw);
 
-// حفظ صورة الخط فقط بدون الخلفية
+// Resampling موحد (uniform time series)
+function resample(points, step = 0.05) {
+    if (points.length < 1) return [];
+    let resampled = [];
+    let targetT = 0.0;
+    let i = 0;
+    let lastP = points[0];
+
+    while (targetT <= points[points.length - 1].t) {
+        // تقدّم للإطار الصحيح
+        while (i < points.length - 1 && points[i + 1].t < targetT) {
+            i++;
+            lastP = points[i];
+        }
+
+        resampled.push({
+            x: lastP.x,
+            y: lastP.y,
+            nx: lastP.nx,
+            ny: lastP.ny,
+            t: parseFloat(targetT.toFixed(3))
+        });
+
+        targetT += step;
+    }
+
+    return resampled;
+}
+
+// حفظ صورة الخط فقط
 function downloadImage() {
     let tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width;
@@ -139,33 +168,33 @@ function downloadImage() {
 
     for (let i = 0; i < points.length; i++) {
         let p = points[i];
-        if (i === 0) {
-            tempCtx.moveTo(p.x, p.y);
-        } else {
-            tempCtx.lineTo(p.x, p.y);
-        }
+        if (i === 0) tempCtx.moveTo(p.x, p.y);
+        else tempCtx.lineTo(p.x, p.y);
     }
-
     tempCtx.stroke();
 
     let link = document.createElement('a');
-    link.download = 'drawing_only.png';
-    link.href = tempCanvas.toDataURL();
+    link.download = `drawing_${Date.now()}.png`;
+    link.href = tempCanvas.toDataURL("image/png");
     link.click();
 }
-// حفظ البيانات
+
+// حفظ البيانات بعد resampling
 function downloadData() {
+    let resampledPoints = resample(points, 0.05);
     let data = {
-        screenWidth: screenWidth,
-        screenHeight: screenHeight,
-        canvasWidth: canvasWidth,
-        canvasHeight: canvasHeight,
-        points: points
+        screenWidth,
+        screenHeight,
+        canvasWidth,
+        canvasHeight,
+        points: resampledPoints
     };
     let blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
     let link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'drawing_data.json';
+    link.download = `trial_${Date.now()}_data.json`;
     link.click();
 }
 </script>
+</body>
+</html>
